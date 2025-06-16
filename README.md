@@ -4,11 +4,24 @@
 
 ## 功能特色
 
+### JWT Token 服務
 - 生成符合 [Jitsi Meet JWT 規範](https://developer.8x8.com/jaas/docs/api-keys-jwt) 的令牌
 - 支援自定義會議室名稱和用戶資訊
 - 內建用戶權限管理（主持人權限）
 - 完整的 features 權限控制
+
+### 會議逐字稿管理
+- **多場會議逐字稿集中管理**
+- **自動去重機制**，避免重複提交
+- **發言者識別和分組**
+- **Markdown 格式輸出**，便於閱讀和分享
+- **會議摘要自動生成**
+- **主持人權限控制**，只有主持人可提交逐字稿
+
+### 技術特色
 - **安全的 CORS 支援**，使用來源白名單機制
+- **Cloudflare D1** 資料庫儲存結構化資料
+- **Cloudflare R2** 儲存 Markdown 檔案
 - 基於 Cloudflare Workers 的無伺服器架構
 
 ## JWT 格式說明
@@ -159,26 +172,63 @@ const ALLOWED_ORIGINS = [
 
 ## 部署到 Cloudflare Workers
 
-### 1. 設定 wrangler.toml
+### 1. 創建 D1 資料庫
 
-確保 `wrangler.toml` 文件已正確配置：
+```bash
+# 創建 D1 資料庫
+wrangler d1 create vtaiwan-transcriptions
 
-```toml
-name = "jitsi-jwt-worker"
-main = "src/index.js"
-compatibility_date = "2024-01-01"
-
-[vars]
-# 環境變數將在 Cloudflare Dashboard 中設定
+# 複製返回的 database_id 到 wrangler.jsonc
 ```
 
-### 2. 部署
+### 2. 創建 R2 儲存桶
+
+```bash
+# 創建 R2 儲存桶
+wrangler r2 bucket create vtaiwan-meeting-files
+```
+
+### 3. 更新 wrangler.jsonc
+
+確保 `wrangler.jsonc` 文件已正確配置：
+
+```jsonc
+{
+  "name": "vtaiwan-jaas-jwt-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2024-01-01",
+  "observability": {
+    "enabled": false
+  },
+  // D1 資料庫配置
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vtaiwan-transcriptions",
+      "database_id": "your-actual-d1-database-id"  // 替換為步驟1返回的ID
+    }
+  ],
+  // R2 儲存桶配置
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "vtaiwan-meeting-files"
+    }
+  ],
+  // 環境變數
+  "vars": {
+    // 這些變數將在 Cloudflare Dashboard 中設定
+  }
+}
+```
+
+### 4. 部署
 
 ```bash
 wrangler deploy
 ```
 
-### 3. 在 Cloudflare Dashboard 中設定環境變數
+### 5. 在 Cloudflare Dashboard 中設定環境變數
 
 1. 登入 [Cloudflare Dashboard](https://dash.cloudflare.com)
 2. 進入 Workers & Pages
@@ -189,9 +239,21 @@ wrangler deploy
    - `JAAS_KEY_ID`
    - `JAAS_PRIVATE_KEY`
 
+### 6. 測試部署
+
+```bash
+# 測試 JWT Token API
+curl "https://your-worker.workers.dev/api/jitsi-token?room=test"
+
+# 測試會議列表 API
+curl "https://your-worker.workers.dev/api/meetings"
+```
+
 ## API 使用方式
 
-### 端點
+### JWT Token API
+
+#### 端點
 
 `GET /api/jitsi-token`
 
@@ -243,6 +305,94 @@ const token2 = await getJitsiToken({
 });
 
 console.log('JWT Token:', token2);
+```
+
+### 會議逐字稿 API
+
+#### 1. 提交逐字稿
+
+**端點：** `POST /api/transcription`
+
+**權限：** 只有主持人可以提交
+
+**請求格式：**
+```json
+{
+  "meeting_id": "meeting-2024-01-15",
+  "transcriptions": [
+    {
+      "meeting_id": "meeting-2024-01-15",
+      "speaker": "張三",
+      "content": "歡迎大家參加今天的會議",
+      "timestamp": "2024-01-15T10:00:00Z"
+    },
+    {
+      "meeting_id": "meeting-2024-01-15",
+      "speaker": "李四",
+      "content": "謝謝主席，我想分享一些想法",
+      "timestamp": "2024-01-15T10:01:00Z"
+    }
+  ]
+}
+```
+
+**回應：**
+```json
+{
+  "success": true,
+  "processed": 2,
+  "new_entries": 2,
+  "duplicates": 0,
+  "errors": 0,
+  "meeting_id": "meeting-2024-01-15"
+}
+```
+
+#### 2. 獲取會議逐字稿
+
+**端點：** `GET /api/transcription/{meetingId}`
+
+**回應：**
+```json
+{
+  "meeting": {
+    "id": "meeting-2024-01-15",
+    "title": "vTaiwan 討論會議",
+    "date": "2024-01-15",
+    "status": "active"
+  },
+  "transcriptions": [...],
+  "stats": {
+    "total_transcriptions": 25,
+    "unique_speakers": 5,
+    "start_time": "2024-01-15T10:00:00Z",
+    "end_time": "2024-01-15T11:30:00Z"
+  }
+}
+```
+
+#### 3. 獲取 Markdown 格式逐字稿
+
+**端點：** `GET /api/transcription/{meetingId}/markdown`
+
+**回應：** Markdown 格式的逐字稿文件
+
+#### 4. 會議管理
+
+**獲取會議列表：** `GET /api/meetings`
+
+**創建會議：** `POST /api/meetings`
+```json
+{
+  "id": "meeting-2024-01-15",
+  "title": "vTaiwan 討論會議",
+  "date": "2024-01-15"
+}
+```
+
+**獲取特定會議：** `GET /api/meetings/{meetingId}`
+
+### 前端整合範例
 
 // React/Vue 等前端框架使用範例
 const JitsiTokenService = {

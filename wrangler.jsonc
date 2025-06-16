@@ -1,47 +1,44 @@
-/**
- * For more details on how to configure Wrangler, refer to:
- * https://developers.cloudflare.com/workers/wrangler/configuration/
- */
 {
-	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "vtaiwan-jaas-jwt-worker",
-	"main": "src/index.js",
-	"compatibility_date": "2025-06-14",
-	"observability": {
-		"enabled": false
-	}
-	/**
-	 * Smart Placement
-	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
-	 */
-	// "placement": { "mode": "smart" },
-
-	/**
-	 * Bindings
-	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
-	 * databases, object storage, AI inference, real-time communication and more.
-	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
-	 */
-
-	/**
-	 * Environment Variables
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
-	 */
-	// "vars": { "MY_VARIABLE": "production_value" },
-	/**
-	 * Note: Use secrets to store sensitive data.
-	 * https://developers.cloudflare.com/workers/configuration/secrets/
-	 */
-
-	/**
-	 * Static Assets
-	 * https://developers.cloudflare.com/workers/static-assets/binding/
-	 */
-	// "assets": { "directory": "./public/", "binding": "ASSETS" },
-
-	/**
-	 * Service Bindings (communicate between multiple Workers)
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
-	 */
-	// "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
+  "name": "vtaiwan-jaas-jwt-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2024-01-01",
+  "observability": {
+    "enabled": false
+  },
+  // 環境變數
+  "vars": {
+    // 這些變數將在 Cloudflare Dashboard 中設定
+    // "JAAS_APP_ID": "your_app_id",
+    // "JAAS_KEY_ID": "your_key_id",
+    // "JAAS_PRIVATE_KEY": "your_private_key"
+  },
+  // D1 資料庫配置
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vtaiwan-transcriptions",
+      "database_id": "1549c21e-2aa2-4f45-8943-3f9f92a543c8"  // 需要替換為實際的 D1 database ID
+    }
+  ],
+  // R2 儲存桶配置
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "vtaiwan-meeting-files",
+      "preview_bucket_name": "vtaiwan-meeting-files-preview"
+    }
+  ],
+  // 環境設定
+  "env": {
+    "development": {
+      "vars": {
+        "ENVIRONMENT": "development"
+      }
+    },
+    "production": {
+      "vars": {
+        "ENVIRONMENT": "production"
+      }
+    }
+  }
 }
