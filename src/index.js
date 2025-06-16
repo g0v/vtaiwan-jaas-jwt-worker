@@ -1,33 +1,109 @@
 import { SignJWT } from 'jose';
 
+// 允許的來源白名單
+const ALLOWED_ORIGINS = [
+  'https://vtaiwan.pages.dev',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:8080',
+  'https://vtaiwan.tw',
+  'https://www.vtaiwan.tw',
+  'https://talk.vtaiwan.tw',
+  // 可以根據需要添加更多允許的來源
+];
+
+// 檢查來源是否被允許
+function isOriginAllowed(origin) {
+  return ALLOWED_ORIGINS.includes(origin);
+}
+
+// 動態生成 CORS headers
+function getCorsHeaders(origin) {
+  const isAllowed = isOriginAllowed(origin);
+
+  return {
+    'Access-Control-Allow-Origin': isAllowed ? origin : 'null',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400', // 24 hours
+    'Vary': 'Origin', // 重要：告訴快取這個回應會根據 Origin 而變化
+  };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const pathname = url.pathname;
-	const user_info = {
-		user_id: url.searchParams.get('user_id'),
-		user_name: url.searchParams.get('user_name'),
-		user_email: url.searchParams.get('user_email'),
-		user_moderator: url.searchParams.get('user_moderator')
-	}
+    const origin = request.headers.get('Origin');
+
+    // 處理 CORS preflight 請求
+    if (request.method === 'OPTIONS') {
+      const corsHeaders = getCorsHeaders(origin);
+
+      // 如果來源不被允許，返回錯誤
+      if (!isOriginAllowed(origin)) {
+        return new Response('Origin not allowed', {
+          status: 403,
+          headers: corsHeaders,
+        });
+      }
+
+      return new Response(null, {
+        status: 200,
+        headers: corsHeaders,
+      });
+    }
 
     if (pathname === '/api/jitsi-token') {
+      const corsHeaders = getCorsHeaders(origin);
+
+      // 檢查來源是否被允許（對於實際請求）
+      if (origin && !isOriginAllowed(origin)) {
+        return new Response(JSON.stringify({
+          error: 'Origin not allowed',
+          allowed_origins: ALLOWED_ORIGINS
+        }), {
+          status: 403,
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          },
+        });
+      }
+
       const room = url.searchParams.get('room') || 'default-room';
+
+      // 從 URL 參數獲取用戶資訊
+      const user_info = {
+        user_id: url.searchParams.get('user_id') || 'user123',
+        user_name: url.searchParams.get('user_name') || 'Your User',
+        user_email: url.searchParams.get('user_email') || 'user@example.com',
+        user_moderator: url.searchParams.get('user_moderator') || 'true'
+      };
 
       try {
         const token = await generateJaasJwt(room, user_info, env);
         return new Response(JSON.stringify({ token }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          },
         });
       } catch (error) {
         return new Response(JSON.stringify({ error: error.message }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          },
         });
       }
     }
 
-    return new Response('Not found', { status: 404 });
+    return new Response('Not found', {
+      status: 404,
+      headers: getCorsHeaders(origin)
+    });
   }
 };
 

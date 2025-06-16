@@ -5,9 +5,10 @@
 ## 功能特色
 
 - 生成符合 [Jitsi Meet JWT 規範](https://developer.8x8.com/jaas/docs/api-keys-jwt) 的令牌
-- 支援自定義會議室名稱
+- 支援自定義會議室名稱和用戶資訊
 - 內建用戶權限管理（主持人權限）
 - 完整的 features 權限控制
+- **安全的 CORS 支援**，使用來源白名單機制
 - 基於 Cloudflare Workers 的無伺服器架構
 
 ## JWT 格式說明
@@ -123,6 +124,39 @@ curl "http://localhost:8787/api/jitsi-token?room=test-room&user_id=user456&user_
 }
 ```
 
+## CORS 白名單配置
+
+此 Worker 使用來源白名單機制來確保安全性。只有在白名單中的網域才能存取 API。
+
+### 修改允許的來源
+
+編輯 `src/index.js` 文件中的 `ALLOWED_ORIGINS` 陣列：
+
+```javascript
+const ALLOWED_ORIGINS = [
+  // 開發環境
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:8080',
+
+  // 生產環境
+  'https://vtaiwan.tw',
+  'https://www.vtaiwan.tw',
+  'https://talk.vtaiwan.tw',
+
+  // 添加您的網域
+  'https://your-domain.com',
+  'https://app.your-domain.com',
+];
+```
+
+### 安全考量
+
+- 不要使用 `*` 作為允許的來源
+- 只添加您信任的網域
+- 使用 HTTPS 來源（生產環境）
+- 定期檢查和更新白名單
+
 ## 部署到 Cloudflare Workers
 
 ### 1. 設定 wrangler.toml
@@ -209,6 +243,55 @@ const token2 = await getJitsiToken({
 });
 
 console.log('JWT Token:', token2);
+
+// React/Vue 等前端框架使用範例
+const JitsiTokenService = {
+  async getToken(meetingConfig) {
+    const {
+      room,
+      userId,
+      userName,
+      userEmail,
+      isModerator = false
+    } = meetingConfig;
+
+    try {
+      const params = new URLSearchParams({
+        room: room || 'default-room',
+        user_id: userId || `user_${Date.now()}`,
+        user_name: userName || 'Anonymous User',
+        user_email: userEmail || 'user@example.com',
+        user_moderator: isModerator.toString()
+      });
+
+      const response = await fetch(`https://your-worker-domain.workers.dev/api/jitsi-token?${params}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.token;
+    } catch (error) {
+      console.error('Failed to get Jitsi token:', error);
+      throw error;
+    }
+  }
+};
+
+// 使用範例
+JitsiTokenService.getToken({
+  room: 'my-meeting-room',
+  userId: 'user123',
+  userName: 'John Doe',
+  userEmail: 'john@example.com',
+  isModerator: true
+}).then(token => {
+  console.log('Got token:', token);
+  // 使用 token 初始化 Jitsi Meet
+}).catch(error => {
+  console.error('Error:', error);
+});
 ```
 
 ## 故障排除
@@ -316,8 +399,26 @@ console.log('JWT Token:', token2);
      - `JAAS_PRIVATE_KEY`: 完整的 PEM 格式私鑰
 
 6. **CORS 錯誤**
-   - 確保請求來源已正確配置
-   - 檢查 Cloudflare Workers 的 CORS 設定
+   - 此 Worker 使用**來源白名單**機制，只允許特定網域存取
+   - **預設允許的來源**：
+	  - `https://vtaiwan.pages.dev` (目前的部署點)
+     - `http://localhost:3000` (開發環境)
+     - `http://localhost:3001` (開發環境)
+     - `http://localhost:8080` (開發環境)
+     - `https://vtaiwan.tw`
+     - `https://www.vtaiwan.tw`
+     - `https://talk.vtaiwan.tw`
+   - **如果遇到 CORS 錯誤**：
+     - 檢查您的網域是否在白名單中
+     - 如需添加新的來源，請修改 `src/index.js` 中的 `ALLOWED_ORIGINS` 陣列
+     - 錯誤回應會包含允許的來源清單
+   - **添加新來源的步驟**：
+     ```javascript
+     const ALLOWED_ORIGINS = [
+       // 現有的來源...
+       'https://your-new-domain.com', // 添加您的網域
+     ];
+     ```
 
 7. **權限錯誤**
    - 確認 Jitsi Meet 憑證是否有效
