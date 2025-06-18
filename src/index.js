@@ -1,32 +1,5 @@
 import { SignJWT } from 'jose';
 
-// 導入工具函數
-import {
-  initializeDatabase,
-  upsertMeeting,
-  getMeeting,
-  getAllMeetings,
-  insertTranscription,
-  getMeetingTranscriptions,
-  deleteMeeting,
-  getMeetingStats
-} from './utils/read_write_D1.js';
-
-import {
-  uploadToR2,
-  downloadFromR2,
-  generateMeetingKey,
-  generateSummaryKey,
-  createMeetingFolder
-} from './utils/read_write_R2.js';
-
-import {
-  batchProcessTranscriptions,
-  formatTranscriptionsToMarkdown,
-  generateMeetingSummary,
-  validateTranscriptionData
-} from './functions/transcription.js';
-
 // 允許的來源白名單
 const ALLOWED_ORIGINS = [
   'https://vtaiwan.pages.dev',
@@ -57,28 +30,11 @@ function getCorsHeaders(origin) {
   };
 }
 
-// 檢查用戶是否為主持人
-function checkModeratorPermission(request) {
-  // 這裡可以根據需要實作更複雜的權限檢查
-  const userModerator = request.headers.get('X-User-Moderator') ||
-                       new URL(request.url).searchParams.get('user_moderator');
-  return userModerator === 'true';
-}
-
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const pathname = url.pathname;
     const origin = request.headers.get('Origin');
-
-    // 初始化資料庫（首次運行時）
-    if (env.DB) {
-      try {
-        await initializeDatabase(env.DB);
-      } catch (error) {
-        console.error('Database initialization error:', error);
-      }
-    }
 
     // 處理 CORS preflight 請求
     if (request.method === 'OPTIONS') {
@@ -98,457 +54,58 @@ export default {
       });
     }
 
-    const corsHeaders = getCorsHeaders(origin);
+    if (pathname === '/api/jitsi-token') {
+      const corsHeaders = getCorsHeaders(origin);
 
-    // 檢查來源是否被允許（對於實際請求）
-    if (origin && !isOriginAllowed(origin)) {
-      return new Response(JSON.stringify({
-        error: 'Origin not allowed',
-        allowed_origins: ALLOWED_ORIGINS
-      }), {
-        status: 403,
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders
-        },
-      });
-    }
-
-    try {
-      // JWT Token 路由（原有功能）
-      if (pathname === '/api/jitsi-token') {
-        return await handleJitsiToken(request, env, corsHeaders);
-      }
-
-      // 逐字稿相關路由
-      if (pathname.startsWith('/api/transcription')) {
-        return await handleTranscriptionRoutes(request, env, corsHeaders);
-      }
-
-      // 會議相關路由
-      if (pathname.startsWith('/api/meetings')) {
-        return await handleMeetingRoutes(request, env, corsHeaders);
-      }
-
-      return new Response('Not found', {
-        status: 404,
-        headers: corsHeaders
-      });
-
-    } catch (error) {
-      console.error('Request handling error:', error);
-      return new Response(JSON.stringify({
-        error: 'Internal server error',
-        message: error.message
-      }), {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders
-        },
-      });
-    }
-  }
-};
-
-// 處理 Jitsi Token 請求（原有功能）
-async function handleJitsiToken(request, env, corsHeaders) {
-  const url = new URL(request.url);
-  const room = url.searchParams.get('room') || 'default-room';
-
-  // 從 URL 參數獲取用戶資訊
-  const user_info = {
-    user_id: url.searchParams.get('user_id') || 'user123',
-    user_name: url.searchParams.get('user_name') || 'Your User',
-    user_email: url.searchParams.get('user_email') || 'user@example.com',
-    user_moderator: url.searchParams.get('user_moderator') || 'true'
-  };
-
-  try {
-    const token = await generateJaasJwt(room, user_info, env);
-    return new Response(JSON.stringify({ token }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  }
-}
-
-// 處理逐字稿相關路由
-async function handleTranscriptionRoutes(request, env, corsHeaders) {
-  const url = new URL(request.url);
-  const pathname = url.pathname;
-
-  // POST /api/transcription - 接收逐字稿
-  if (pathname === '/api/transcription' && request.method === 'POST') {
-    return await handleSubmitTranscription(request, env, corsHeaders);
-  }
-
-  // GET /api/transcription/{meetingId} - 獲取會議逐字稿
-  if (pathname.match(/^\/api\/transcription\/([^\/]+)$/) && request.method === 'GET') {
-    const meetingId = pathname.split('/')[3];
-    return await handleGetTranscription(meetingId, env, corsHeaders);
-  }
-
-  // GET /api/transcription/{meetingId}/markdown - 獲取 Markdown 格式逐字稿
-  if (pathname.match(/^\/api\/transcription\/([^\/]+)\/markdown$/) && request.method === 'GET') {
-    const meetingId = pathname.split('/')[3];
-    return await handleGetMarkdownTranscription(meetingId, env, corsHeaders);
-  }
-
-  return new Response('Not found', {
-    status: 404,
-    headers: corsHeaders
-  });
-}
-
-// 處理會議相關路由
-async function handleMeetingRoutes(request, env, corsHeaders) {
-  const url = new URL(request.url);
-  const pathname = url.pathname;
-
-  // GET /api/meetings - 獲取會議列表
-  if (pathname === '/api/meetings' && request.method === 'GET') {
-    return await handleGetMeetings(request, env, corsHeaders);
-  }
-
-  // POST /api/meetings - 創建會議
-  if (pathname === '/api/meetings' && request.method === 'POST') {
-    return await handleCreateMeeting(request, env, corsHeaders);
-  }
-
-  // GET /api/meetings/{meetingId} - 獲取特定會議
-  if (pathname.match(/^\/api\/meetings\/([^\/]+)$/) && request.method === 'GET') {
-    const meetingId = pathname.split('/')[3];
-    return await handleGetMeeting(meetingId, env, corsHeaders);
-  }
-
-  return new Response('Not found', {
-    status: 404,
-    headers: corsHeaders
-  });
-}
-
-// 提交逐字稿
-async function handleSubmitTranscription(request, env, corsHeaders) {
-  // 檢查主持人權限
-  if (!checkModeratorPermission(request)) {
-    return new Response(JSON.stringify({
-      error: 'Only moderators can submit transcriptions'
-    }), {
-      status: 403,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  }
-
-  try {
-    const data = await request.json();
-
-    // 驗證必要欄位
-    if (!data.meeting_id || !data.transcriptions || !Array.isArray(data.transcriptions)) {
-      return new Response(JSON.stringify({
-        error: 'Invalid request format. Expected: { meeting_id, transcriptions: [] }'
-      }), {
-        status: 400,
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders
-        },
-      });
-    }
-
-    // 處理逐字稿資料
-    const { processed, errors } = batchProcessTranscriptions(data.transcriptions);
-
-    if (errors.length > 0) {
-      console.warn('Transcription processing errors:', errors);
-    }
-
-    // 儲存到 D1
-    const results = [];
-    for (const transcription of processed) {
-      const result = await insertTranscription(env.DB, transcription);
-      results.push(result);
-    }
-
-    // 生成並儲存 Markdown 到 R2
-    const allTranscriptions = await getMeetingTranscriptions(env.DB, data.meeting_id);
-    const meetingInfo = await getMeeting(env.DB, data.meeting_id);
-
-    if (allTranscriptions.length > 0) {
-      const markdown = formatTranscriptionsToMarkdown(allTranscriptions, meetingInfo);
-      const markdownKey = generateMeetingKey(data.meeting_id, 'md');
-      await uploadToR2(env.R2, markdownKey, markdown);
-
-      // 生成摘要
-      const summary = generateMeetingSummary(allTranscriptions, meetingInfo);
-      const summaryKey = generateSummaryKey(data.meeting_id);
-      await uploadToR2(env.R2, summaryKey, summary);
-    }
-
-    const duplicateCount = results.filter(r => r.duplicate).length;
-    const newCount = results.filter(r => !r.duplicate).length;
-
-    return new Response(JSON.stringify({
-      success: true,
-      processed: processed.length,
-      new_entries: newCount,
-      duplicates: duplicateCount,
-      errors: errors.length,
-      meeting_id: data.meeting_id
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-
-  } catch (error) {
-    console.error('Submit transcription error:', error);
-    return new Response(JSON.stringify({
-      error: 'Failed to process transcription',
-      message: error.message
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  }
-}
-
-// 獲取逐字稿
-async function handleGetTranscription(meetingId, env, corsHeaders) {
-  try {
-    const transcriptions = await getMeetingTranscriptions(env.DB, meetingId);
-    const meetingInfo = await getMeeting(env.DB, meetingId);
-    const stats = await getMeetingStats(env.DB, meetingId);
-
-    return new Response(JSON.stringify({
-      meeting: meetingInfo,
-      transcriptions,
-      stats
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  } catch (error) {
-    console.error('Get transcription error:', error);
-    return new Response(JSON.stringify({
-      error: 'Failed to get transcription',
-      message: error.message
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  }
-}
-
-// 獲取 Markdown 格式逐字稿
-async function handleGetMarkdownTranscription(meetingId, env, corsHeaders) {
-  try {
-    const markdownKey = generateMeetingKey(meetingId, 'md');
-    const result = await downloadFromR2(env.R2, markdownKey);
-
-    if (!result.success) {
-      // 如果 R2 中沒有，從 D1 重新生成
-      const transcriptions = await getMeetingTranscriptions(env.DB, meetingId);
-      const meetingInfo = await getMeeting(env.DB, meetingId);
-
-      if (transcriptions.length === 0) {
-        return new Response('Meeting transcription not found', {
-          status: 404,
-          headers: corsHeaders
+      // 檢查來源是否被允許（對於實際請求）
+      if (origin && !isOriginAllowed(origin)) {
+        return new Response(JSON.stringify({
+          error: 'Origin not allowed',
+          allowed_origins: ALLOWED_ORIGINS
+        }), {
+          status: 403,
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          },
         });
       }
 
-      const markdown = formatTranscriptionsToMarkdown(transcriptions, meetingInfo);
+      const room = url.searchParams.get('room') || 'default-room';
 
-      // 儲存到 R2 以供下次使用
-      await uploadToR2(env.R2, markdownKey, markdown);
+      // 從 URL 參數獲取用戶資訊
+      const user_info = {
+        user_id: url.searchParams.get('user_id') || 'user123',
+        user_name: url.searchParams.get('user_name') || 'Your User',
+        user_email: url.searchParams.get('user_email') || 'user@example.com',
+        user_moderator: url.searchParams.get('user_moderator') || 'true'
+      };
 
-      return new Response(markdown, {
-        headers: {
-          'Content-Type': 'text/markdown; charset=utf-8',
-          ...corsHeaders
-        },
-      });
-    }
-
-    return new Response(result.content, {
-      headers: {
-        'Content-Type': 'text/markdown; charset=utf-8',
-        ...corsHeaders
-      },
-    });
-  } catch (error) {
-    console.error('Get markdown transcription error:', error);
-    return new Response(JSON.stringify({
-      error: 'Failed to get markdown transcription',
-      message: error.message
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  }
-}
-
-// 獲取會議列表
-async function handleGetMeetings(request, env, corsHeaders) {
-  try {
-    const url = new URL(request.url);
-    const limit = parseInt(url.searchParams.get('limit')) || 50;
-    const offset = parseInt(url.searchParams.get('offset')) || 0;
-
-    const meetings = await getAllMeetings(env.DB, limit, offset);
-
-    return new Response(JSON.stringify({
-      meetings,
-      pagination: {
-        limit,
-        offset,
-        count: meetings.length
+      try {
+        const token = await generateJaasJwt(room, user_info, env);
+        return new Response(JSON.stringify({ token }), {
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          },
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          },
+        });
       }
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  } catch (error) {
-    console.error('Get meetings error:', error);
-    return new Response(JSON.stringify({
-      error: 'Failed to get meetings',
-      message: error.message
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  }
-}
-
-// 創建會議
-async function handleCreateMeeting(request, env, corsHeaders) {
-  // 檢查主持人權限
-  if (!checkModeratorPermission(request)) {
-    return new Response(JSON.stringify({
-      error: 'Only moderators can create meetings'
-    }), {
-      status: 403,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  }
-
-  try {
-    const data = await request.json();
-
-    if (!data.id || !data.title || !data.date) {
-      return new Response(JSON.stringify({
-        error: 'Missing required fields: id, title, date'
-      }), {
-        status: 400,
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders
-        },
-      });
     }
 
-    const result = await upsertMeeting(env.DB, data);
-
-    // 創建 R2 資料夾結構
-    if (env.R2) {
-      await createMeetingFolder(env.R2, data.id);
-    }
-
-    return new Response(JSON.stringify({
-      success: true,
-      meeting: result
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  } catch (error) {
-    console.error('Create meeting error:', error);
-    return new Response(JSON.stringify({
-      error: 'Failed to create meeting',
-      message: error.message
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
+    return new Response('Not found', {
+      status: 404,
+      headers: getCorsHeaders(origin)
     });
   }
-}
-
-// 獲取特定會議
-async function handleGetMeeting(meetingId, env, corsHeaders) {
-  try {
-    const meeting = await getMeeting(env.DB, meetingId);
-
-    if (!meeting) {
-      return new Response('Meeting not found', {
-        status: 404,
-        headers: corsHeaders
-      });
-    }
-
-    const stats = await getMeetingStats(env.DB, meetingId);
-
-    return new Response(JSON.stringify({
-      meeting,
-      stats
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  } catch (error) {
-    console.error('Get meeting error:', error);
-    return new Response(JSON.stringify({
-      error: 'Failed to get meeting',
-      message: error.message
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders
-      },
-    });
-  }
-}
+};
 
 async function generateJaasJwt(room, user_info, env) {
   const appId = env.JAAS_APP_ID;
