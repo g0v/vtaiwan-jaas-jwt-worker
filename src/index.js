@@ -266,15 +266,11 @@ async function generateJaasJwt(room, user_info, env) {
         moderator: userModerator // 字串格式
       },
       features: {
-        livestreaming: "false",
-        recording: "false",
-        transcription: "true",
-        "sip-inbound-call": "false",
-        "sip-outbound-call": "false",
-        "inbound-call": "false",
-        "outbound-call": "false",
-        "send-groupchat": "true",
-        "create-polls": "true"
+				"livestreaming": true,
+				"outbound-call": true,
+				"sip-outbound-call": false,
+				"transcription": true,
+				"recording": true
       },
       room: {
         regex: false
