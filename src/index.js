@@ -268,7 +268,7 @@ async function generateJaasJwt(room, user_info, env) {
       features: {
         livestreaming: "false",
         recording: "false",
-        transcription: "false",
+        transcription: "true",
         "sip-inbound-call": "false",
         "sip-outbound-call": "false",
         "inbound-call": "false",
