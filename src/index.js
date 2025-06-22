@@ -62,7 +62,11 @@ export default {
 			// 從POST的attachment file中讀取transcription
 			const formData = await request.formData();
 			const file = formData.get('file');
-			const transcription = await file.text();
+
+			// 確保正確處理中文編碼
+			const arrayBuffer = await file.arrayBuffer();
+			const decoder = new TextDecoder('utf-8');
+			const transcription = decoder.decode(arrayBuffer);
 			// console.log(transcription);
 			const outline = await generateOutline(transcription, env);
 			console.log(outline);
@@ -92,58 +96,68 @@ export default {
 			});
 		}
 
-		// 上傳整篇逐字稿
+				// 上傳整篇逐字稿
 		if (pathname === '/api/upload-transcription') {
 			const corsHeaders = getCorsHeaders(origin);
 
-		// 從POST的attachment file中讀取transcription
-		const formData = await request.formData();
-		const file = formData.get('file');
-		const transcription = await file.text();
+			// 從POST的attachment file中讀取
+			const formData = await request.formData();
+			const file = formData.get('file');
 
-      // 檔案名稱例，transcript-2025-06-21.txt，內容是逐字稿
-
+			// 檔案名稱例，transcript-2025-06-21.txt，內容是逐字稿
 			const meeting_id = file.name
 				.replace('.txt', '')
 				.replace('transcript-', '')
 				.split('-')
 				.join('');
 
-			console.log(meeting_id);
+			console.log('Meeting ID:', meeting_id);
 
+			// 1. 讀取檔案內容
+			const arrayBuffer = await file.arrayBuffer();
+			const decoder = new TextDecoder('utf-8');
+			const transcription = decoder.decode(arrayBuffer);
+			console.log('File content read');
+
+			// 2. 上傳到R2，內容原封不動
+			const r2 = env.R2;
+			const key = `${meeting_id}.txt`;
+			await r2.put(key, file.stream(), {
+				httpMetadata: {
+					contentType: 'text/plain; charset=utf-8'
+				}
+			});
+			console.log('File uploaded to R2:', key);
+
+			// 3. AI處理
 			const outline = await generateOutline(transcription, env);
 
-			// 我只有一個table，叫transcriptions，先檢查meeting_id是否存在
+			// 4. 檢查D1資料庫中是否存在
 			const meeting = await env.DB.prepare('SELECT * FROM transcriptions WHERE meeting_id = ?').bind(meeting_id).first();
 
 			if (!meeting) {
-				// 創建一個新的逐字稿
-				console.log('Creating new transcription');
-				await env.DB.prepare('INSERT INTO transcriptions (meeting_id, transcription, outline) VALUES (?, ?, ?)').bind(meeting_id, outline, transcription).run();
+				// 創建一個新的逐字稿記錄
+				console.log('Creating new transcription record');
+				await env.DB.prepare('INSERT INTO transcriptions (meeting_id, transcription, outline) VALUES (?, ?, ?)').bind(meeting_id, transcription, outline).run();
 
-				// 上傳逐字稿到R2
-				const r2 = env.R2;
-				const key = `${meeting_id}.txt`;
-				await r2.put(key, transcription);
-				console.log('Transcription uploaded successfully');
-				console.log(key);
-				return new Response(JSON.stringify({ message: 'Transcription created successfully' }), {
+				return new Response(JSON.stringify({
+					message: 'Transcription created successfully',
+					meeting_id: meeting_id,
+					r2_key: key
+				}), {
 					status: 200,
 					headers: corsHeaders,
 				});
 			} else {
-				// 如果存在，則更新逐字稿
-				console.log('Updating transcription');
+				// 更新現有的逐字稿記錄
+				console.log('Updating transcription record');
 				await env.DB.prepare('UPDATE transcriptions SET transcription = ?, outline = ? WHERE meeting_id = ?').bind(transcription, outline, meeting_id).run();
 
-				// 上傳逐字稿到R2
-				const r2 = env.R2;
-				const key = `${meeting_id}.txt`;
-				await r2.put(key, transcription);
-				console.log('Transcription uploaded successfully');
-				console.log(key);
-
-				return new Response(JSON.stringify({ message: 'Transcription updated successfully' }), {
+				return new Response(JSON.stringify({
+					message: 'Transcription updated successfully',
+					meeting_id: meeting_id,
+					r2_key: key
+				}), {
 					status: 200,
 					headers: corsHeaders,
 				});
