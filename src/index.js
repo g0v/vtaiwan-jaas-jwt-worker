@@ -95,8 +95,21 @@ export default {
 		// 上傳整篇逐字稿
 		if (pathname === '/api/upload-transcription') {
 			const corsHeaders = getCorsHeaders(origin);
-			const body = await request.json();
-			const { meeting_id, transcription } = body;
+
+		// 從POST的attachment file中讀取transcription
+		const formData = await request.formData();
+		const file = formData.get('file');
+		const transcription = await file.text();
+
+      // 檔案名稱例，transcript-2025-06-21.txt，內容是逐字稿
+
+			const meeting_id = file.name
+				.replace('.txt', '')
+				.replace('transcript-', '')
+				.split('-')
+				.join('');
+
+			console.log(meeting_id);
 
 			const outline = await generateOutline(transcription, env);
 

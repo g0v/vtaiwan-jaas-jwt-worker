@@ -13,13 +13,10 @@ curl -X POST \
 
 ```bash
 curl -X POST \
-  -H "Content-Type: application/json" \
+  -F "file=@files/transcript-2025-06-21.txt" \
   -H "Origin: http://localhost:3000" \
-  -d '{
-    "meeting_id": "20250622",
-    "transcription": "這是測試，今天的太陽很好，時間也很充裕。我來做一點測試吧。逐字稿的摘要用英文整理也行吧。"
-  }' \
   http://localhost:8787/api/upload-transcription
+```
 
 ### 創建資料庫表格
 
