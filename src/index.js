@@ -1,5 +1,7 @@
 import { SignJWT } from 'jose';
 
+import { generateOutline } from './ai.js';
+
 // 允許的來源白名單
 const ALLOWED_ORIGINS = [
   'https://vtaiwan.pages.dev',
@@ -54,6 +56,88 @@ export default {
       });
     }
 
+		// 單獨測試AI的整理功能
+		if (pathname === '/api/test-ai') {
+			const corsHeaders = getCorsHeaders(origin);
+			// 從POST的attachment file中讀取transcription
+			const formData = await request.formData();
+			const file = formData.get('file');
+			const transcription = await file.text();
+			// console.log(transcription);
+			const outline = await generateOutline(transcription, env);
+			console.log(outline);
+			return new Response(outline, {
+				status: 200,
+				headers: corsHeaders,
+			});
+		}
+
+		// 查詢整個Table
+		if (pathname === '/api/query-table') {
+			const corsHeaders = getCorsHeaders(origin);
+			const transcriptions = await env.DB.prepare('SELECT * FROM transcriptions').all();
+			return new Response(JSON.stringify(transcriptions.results), {
+				status: 200,
+				headers: corsHeaders,
+			});
+		}
+
+		// 單獨創建Table
+		if (pathname === '/api/create-table') {
+			const corsHeaders = getCorsHeaders(origin);
+			await env.DB.prepare('CREATE TABLE IF NOT EXISTS transcriptions (meeting_id TEXT, transcription TEXT, outline TEXT)').run();
+			return new Response(JSON.stringify({ message: 'Table created successfully' }), {
+				status: 200,
+				headers: corsHeaders,
+			});
+		}
+
+		// 上傳整篇逐字稿
+		if (pathname === '/api/upload-transcription') {
+			const corsHeaders = getCorsHeaders(origin);
+			const body = await request.json();
+			const { meeting_id, transcription } = body;
+
+			const outline = await generateOutline(transcription, env);
+
+			// 我只有一個table，叫transcriptions，先檢查meeting_id是否存在
+			const meeting = await env.DB.prepare('SELECT * FROM transcriptions WHERE meeting_id = ?').bind(meeting_id).first();
+
+			if (!meeting) {
+				// 創建一個新的逐字稿
+				console.log('Creating new transcription');
+				await env.DB.prepare('INSERT INTO transcriptions (meeting_id, transcription, outline) VALUES (?, ?, ?)').bind(meeting_id, outline, transcription).run();
+
+				// 上傳逐字稿到R2
+				const r2 = env.R2;
+				const key = `${meeting_id}.txt`;
+				await r2.put(key, transcription);
+				console.log('Transcription uploaded successfully');
+				console.log(key);
+				return new Response(JSON.stringify({ message: 'Transcription created successfully' }), {
+					status: 200,
+					headers: corsHeaders,
+				});
+			} else {
+				// 如果存在，則更新逐字稿
+				console.log('Updating transcription');
+				await env.DB.prepare('UPDATE transcriptions SET transcription = ?, outline = ? WHERE meeting_id = ?').bind(transcription, outline, meeting_id).run();
+
+				// 上傳逐字稿到R2
+				const r2 = env.R2;
+				const key = `${meeting_id}.txt`;
+				await r2.put(key, transcription);
+				console.log('Transcription uploaded successfully');
+				console.log(key);
+
+				return new Response(JSON.stringify({ message: 'Transcription updated successfully' }), {
+					status: 200,
+					headers: corsHeaders,
+				});
+			}
+		}
+
+		// Jitsi Token
     if (pathname === '/api/jitsi-token') {
       const corsHeaders = getCorsHeaders(origin);
 
