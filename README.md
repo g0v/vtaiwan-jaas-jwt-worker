@@ -97,7 +97,7 @@ your_private_key_content_here
 ### 4. 本地測試
 
 ```bash
-wrangler dev
+wrangler dev --remote
 ```
 
 服務將在 `http://localhost:8787` 啟動。
