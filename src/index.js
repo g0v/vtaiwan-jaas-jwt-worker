@@ -383,8 +383,8 @@ async function generateJaasJwt(room, user_info, env) {
 				"livestreaming": true,
 				"outbound-call": true,
 				"sip-outbound-call": false,
-				"transcription": true,
-				"recording": true
+				"transcription": false,
+				"recording": false
       },
       room: {
         regex: false
