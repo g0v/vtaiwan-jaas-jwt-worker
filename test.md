@@ -31,3 +31,16 @@ curl -X POST \
 ```bash
 http://localhost:8787/api/query-table
 ```
+
+### 更新逐字稿的outline
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "Origin: http://localhost:3000" \
+  -d '{
+    "meeting_id": "20250621",
+    "outline": "這是一個樣稿，大綱內容為一項測試"
+  }' \
+  http://localhost:8787/api/update-outline
+```

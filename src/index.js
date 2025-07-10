@@ -167,6 +167,17 @@ export default {
 			}
 		}
 
+		// 更新逐字稿的outline，從POST的JSON中獲取meeting_id和outline
+		if (pathname === '/api/update-outline') {
+			const corsHeaders = getCorsHeaders(origin);
+			const { meeting_id, outline } = await request.json();
+			await env.DB.prepare('UPDATE transcriptions SET outline = ? WHERE meeting_id = ?').bind(outline, meeting_id).run();
+			return new Response(JSON.stringify({ message: 'Outline updated successfully' }), {
+				status: 200,
+				headers: corsHeaders,
+			});
+		}
+
 		// Jitsi Token
     if (pathname === '/api/jitsi-token') {
       const corsHeaders = getCorsHeaders(origin);
