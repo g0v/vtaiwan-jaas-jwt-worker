@@ -1,3 +1,11 @@
+# 專案開發遷移
+
+本專案為歷史留存，目前線上的vTaiwan主站專案儲存庫為：
+https://github.com/g0v/vTaiwan-hono
+
+若要提出錯誤回報與功能請求，請至：
+https://github.com/g0v/vTaiwan-hono/issues
+
 # Jitsi JWT Worker
 
 這是一個 Cloudflare Worker，用於生成 Jitsi Meet JWT 令牌，讓您可以安全地加入 Jitsi 會議室。
